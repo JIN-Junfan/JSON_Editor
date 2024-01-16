@@ -1,34 +1,12 @@
-from PyQt5.QtCore import Qt,QEvent 
-from json_editor_UI_ui import *
-from PyQt5.QtWidgets import QMainWindow, QApplication, QSplitter, QVBoxLayout, QWidget, QAction, QFileDialog, QMessageBox,QTreeWidgetItem, QLineEdit,QToolBar, QPlainTextEdit, QMenu
-from PyQt5.QtGui import QIcon, QPixmap, QKeyEvent
-from PyQt5.QtCore import QByteArray
-
+from PyQt5.QtWidgets import QAction, QFileDialog, QMessageBox, QTreeWidgetItem, QToolBar, QMenu
+from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtCore import Qt, QByteArray
 import json
-import sys
+
 from exe_resource import Icon
+from json_editor_UI_ui import *
+from cunstom_widget import *
 
-class CustomPlainTextEdit(QPlainTextEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_window = parent
-
-    def keyPressEvent(self, event):
-        # 如果是Ctrl+回车，则换行
-        if event.key() == Qt.Key_Return and event.modifiers() & Qt.ControlModifier:
-            self.insertPlainText('\n')
-        # 如果键盘输入回车或者小键盘回车，则退出编辑
-        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
-            self.parent_window.finish_edit()
-        elif event.key() == Qt.Key_Escape:
-            self.parent_window.cancel_edit()
-        else:
-            super().keyPressEvent(event)
-    
-    def focusOutEvent(self, event):
-        # 在失去焦点时退出编辑
-        self.parent_window.finish_edit()
-        super().focusOutEvent(event)
 
 class Json_Edit(Ui_MainWindow):
     def __init__(self):
@@ -49,6 +27,8 @@ class Json_Edit(Ui_MainWindow):
         self.win_icon = self.icon_setup(Icon.JSON)
         self.Win.treeWidget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.Win.treeWidget.customContextMenuRequested.connect(self.context_menu_init)
+        self.Win.treeWidget.setEnabled(False)
+        self.Win.le_Dir.setFocusPolicy(Qt.ClickFocus)
     
     # 参数初始化
     def parameter_init(self):
@@ -56,42 +36,12 @@ class Json_Edit(Ui_MainWindow):
         self.change_record = {}
         self.undo_record = {}
         self.save_data = None
-        
+        self.unicode_flag = True
+    
     # 信号连接
     def connection_init(self):
         self.Win.treeWidget.clicked.connect(self.get_selected_content)
         self.Win.treeWidget.itemDoubleClicked.connect(self.edit_item)
-    
-    # 工具条初始化
-    def toolbar_init(self):
-        self.basic_toolbar = QToolBar("Toolbar", self) 
-        self.addToolBar(self.basic_toolbar)
-        self.new_toolbar_action = QAction(self.icon_setup(Icon.NEW_FILE), '新建',self)
-        self.basic_toolbar.addAction(self.new_toolbar_action)
-        self.open_toolbar_action = QAction(self.icon_setup(Icon.OPEN), '打开',self)
-        self.open_toolbar_action.triggered.connect(self.open_file_func)
-        self.basic_toolbar.addAction(self.open_toolbar_action)
-        self.save_toolbar_action = QAction(self.icon_setup(Icon.SAVE), '保存',self)
-        self.save_toolbar_action.triggered.connect(self.save_func)
-        self.basic_toolbar.addAction(self.save_toolbar_action)
-        self.saveas_toolbar_action = QAction(self.icon_setup(Icon.SAVEAS), '另存为',self)
-        self.basic_toolbar.addAction(self.saveas_toolbar_action)
-        self.undo_toolbar_action = QAction(self.icon_setup(Icon.UNDO), '撤销',self)
-        self.basic_toolbar.addAction(self.undo_toolbar_action)
-        self.recover_toolbar_action = QAction(self.icon_setup(Icon.RECOVER), '恢复',self)
-        self.basic_toolbar.addAction(self.recover_toolbar_action)
-        self.search_toolbar_action = QAction(self.icon_setup(Icon.SEARCH), '查找',self)
-        self.basic_toolbar.addAction(self.search_toolbar_action)
-        self.undo_recover_update()
-    
-    # 撤销恢复更新
-    def undo_recover_update(self):
-        if not self.change_record:
-            self.undo_toolbar_action.setEnabled(False)
-        else: self.undo_toolbar_action.setEnabled(True)
-        if not self.undo_record:
-            self.recover_toolbar_action.setEnabled(False)
-        else: self.recover_toolbar_action.setEnabled(True)
     
     # 设置图标
     def icon_setup(self, icon_code):
@@ -110,8 +60,10 @@ class Json_Edit(Ui_MainWindow):
         self.file_menu.addAction(self.open_menubar_action)
         self.open_menubar_action.triggered.connect(self.open_file_func)
         self.save_menubar_action = QAction('保存', self)
+        self.save_menubar_action.triggered.connect(lambda: self.save_func(self.current_file_path))
         self.file_menu.addAction(self.save_menubar_action)
         self.saveas_menubar_action = QAction('另存为', self)
+        self.saveas_menubar_action.triggered.connect(self.save_as_func)
         self.file_menu.addAction(self.saveas_menubar_action)
         self.option_menubar_action = QAction('选项', self)
         self.file_menu.addAction(self.option_menubar_action)
@@ -121,6 +73,11 @@ class Json_Edit(Ui_MainWindow):
         
         # 编辑栏
         self.edit_menu = self.menubar.addMenu('编辑')
+        self.unicode_menubar_action = QAction('使用Unicode编码', self)
+        self.unicode_menubar_action.setCheckable(True)
+        self.unicode_menubar_action.setChecked(True)
+        self.unicode_menubar_action.triggered.connect(self.Unicode_update)
+        self.edit_menu.addAction(self.unicode_menubar_action)
         
         # 查找栏
         self.search_menu = self.menubar.addMenu('查看')
@@ -138,33 +95,93 @@ class Json_Edit(Ui_MainWindow):
         # 帮助栏
         self.help_menu = self.menubar.addMenu('帮助')
     
+    # 工具条初始化
+    def toolbar_init(self):
+        self.basic_toolbar = QToolBar("Toolbar", self) 
+        self.addToolBar(self.basic_toolbar)
+        self.new_toolbar_action = QAction(self.icon_setup(Icon.NEW_FILE), '新建',self)
+        self.basic_toolbar.addAction(self.new_toolbar_action)
+        self.open_toolbar_action = QAction(self.icon_setup(Icon.OPEN), '打开',self)
+        self.open_toolbar_action.triggered.connect(self.open_file_func)
+        self.basic_toolbar.addAction(self.open_toolbar_action)
+        self.save_toolbar_action = QAction(self.icon_setup(Icon.SAVE), '保存',self)
+        self.save_toolbar_action.triggered.connect(lambda: self.save_func(self.current_file_path))
+        self.basic_toolbar.addAction(self.save_toolbar_action)
+        self.saveas_toolbar_action = QAction(self.icon_setup(Icon.SAVEAS), '另存为',self)
+        self.saveas_toolbar_action.triggered.connect(self.save_as_func)
+        self.basic_toolbar.addAction(self.saveas_toolbar_action)
+        self.undo_toolbar_action = QAction(self.icon_setup(Icon.UNDO), '撤销',self)
+        self.basic_toolbar.addAction(self.undo_toolbar_action)
+        self.recover_toolbar_action = QAction(self.icon_setup(Icon.RECOVER), '恢复',self)
+        self.basic_toolbar.addAction(self.recover_toolbar_action)
+        self.search_toolbar_action = QAction(self.icon_setup(Icon.SEARCH), '查找',self)
+        self.basic_toolbar.addAction(self.search_toolbar_action)
+        self.unicode_toolbar_action = QAction(self.icon_setup(Icon.UNICODE), '使用Unicode编码',self)
+        self.unicode_toolbar_action.setCheckable(True)
+        self.unicode_toolbar_action.setChecked(True)
+        self.unicode_toolbar_action.triggered.connect(self.Unicode_update)
+        self.basic_toolbar.addAction(self.unicode_toolbar_action)
+        self.undo_recover_update()
+    
+    # 撤销恢复更新
+    def undo_recover_update(self):
+        if not self.change_record:
+            self.undo_toolbar_action.setEnabled(False)
+        else: self.undo_toolbar_action.setEnabled(True)
+        if not self.undo_record:
+            self.recover_toolbar_action.setEnabled(False)
+        else: self.recover_toolbar_action.setEnabled(True)
+    
     # 右键菜单
     def context_menu_init(self, pos):
         item = self.sender().itemAt(pos)
+        index = self.Win.treeWidget.indexFromItem(item)
+        print(index)
+        print(item)
         if item:
             column = self.sender().currentColumn()
             if column == 0:
                 # 创建 Key 的右键菜单
                 key_menu = QMenu(self)
-                rename_action = QAction('重命名', self)
-                key_menu.addAction(rename_action)
-                plugin_action = QAction('插入(向前)', self)
-                key_menu.addAction(plugin_action)
-                new_item_action = QAction('新建(向后)', self)
-                key_menu.addAction(new_item_action)
-                delete_action = QAction('删除', self)
-                key_menu.addAction(delete_action)
+                expand_action = QAction('展开', self)
+                expand_action.setEnabled(not item.isExpanded())
+                expand_action.triggered.connect(lambda: self.Win.treeWidget.expand(index))
+                key_menu.addAction(expand_action)
+                collapse_action = QAction('折叠', self)
+                collapse_action.setEnabled(item.isExpanded())
+                collapse_action.triggered.connect(lambda: self.Win.treeWidget.collapse(index))
+                key_menu.addAction(collapse_action)
+                key_menu.addAction(self.all_expand_action)
+                key_menu.addAction(self.all_collapse_action)
+                plugin_before_menu = QMenu('插入(向前)', self)
+                key_menu.addMenu(plugin_before_menu)
+                new_item_action = QAction('项目', self)
+                new_dict_action = QAction('对象/字典', self)
+                new_list_action = QAction('数组/列表', self)
+                plugin_before_menu.addAction(new_item_action)
+                plugin_before_menu.addAction(new_dict_action)
+                plugin_before_menu.addAction(new_list_action)
+                plugin_after_menu =  QMenu('新建(向后)', self)
+                key_menu.addMenu(plugin_after_menu)
+                plugin_after_menu.addAction(new_item_action)
+                plugin_after_menu.addAction(new_dict_action)
+                plugin_after_menu.addAction(new_list_action)
                 cut_action = QAction('剪切', self)
                 key_menu.addAction(cut_action)
                 copy_action = QAction('复制', self)
                 key_menu.addAction(copy_action)
                 paste_action = QAction('粘贴', self)
                 key_menu.addAction(paste_action)
+                delete_action = QAction('删除', self)
+                key_menu.addAction(delete_action)
+                rename_action = QAction('重命名', self)
+                key_menu.addAction(rename_action)
                 key_menu.exec_(self.sender().mapToGlobal(pos))
             elif column == 1:
                 # 创建 Value 的右键菜单
                 value_menu = QMenu(self)
                 change_type_menu = QMenu('改变数据类型', value_menu)
+                change_type_menu.setEnabled(False if item.childCount()>0 else True)
                 value_menu.addMenu(change_type_menu)
                 
                 int_action = QAction('int整数型', self)
@@ -196,6 +213,13 @@ class Json_Edit(Ui_MainWindow):
                 value_menu.addAction('Value Action 2')
                 value_menu.exec_(self.sender().mapToGlobal(pos))
     
+    # 更新Unicode设置
+    def Unicode_update(self):
+        self.unicode_flag = not self.unicode_flag
+        self.unicode_menubar_action.setChecked(self.unicode_flag)
+        self.unicode_toolbar_action.setChecked(self.unicode_flag)
+
+    # 打开文件
     def open_file_func(self):
         # 打开浏览文件的对话框
         options = QFileDialog.Options()
@@ -217,6 +241,8 @@ class Json_Edit(Ui_MainWindow):
         # 建立json数据树
         self.populate_tree(self.json_data, self.Win.treeWidget)
         self.apply_expanded_state(self.Win.treeWidget.invisibleRootItem(), expanded_state)
+        if self.current_file_path:
+            self.Win.treeWidget.setEnabled(True)
     
     def record_expanded_state(self, item, expanded_state):
         # 递归记录项的展开状态
@@ -336,6 +362,7 @@ class Json_Edit(Ui_MainWindow):
     def cancel_edit(self):
         self.Win.treeWidget.removeItemWidget(self.currentEditingItem, self.currentEditingColumn)
         self.currentEditingItem.setText(self.currentEditingColumn, self.original_text)
+    
     # 结束编辑
     def finish_edit(self):
         # 找到编辑器实例
@@ -352,7 +379,7 @@ class Json_Edit(Ui_MainWindow):
         if edited_text != self.original_text:
             self.save_change[data_path] = [None, data_type, edited_text]
     
-    def save_func(self):
+    def save_func(self, file_path):
         for key, value in self.save_change.items():
             path_list = key.split('/')
             parent = self.json_data
@@ -369,8 +396,8 @@ class Json_Edit(Ui_MainWindow):
                 else: parent[path_list[-1]] = str(value[2])
             else:
                 parent[path_list[-1]] = self.convert_data_type(str(value[1]), value[2])
-        with open(self.current_file_path, 'w', encoding='utf-8') as json_file:
-            json.dump(self.json_data, json_file)
+        with open(file_path, 'w', encoding='utf-8') as json_file:
+            json.dump(self.json_data, json_file, ensure_ascii=self.unicode_menubar_action.isChecked())
         self.update_tree()
     
     def convert_data_type(self, data_type, data):
@@ -409,3 +436,10 @@ class Json_Edit(Ui_MainWindow):
             self.save_change[path][1] = type(data_type)
         else: 
             self.save_change[path] = [path, type(data_type), item.text(1)]
+    
+    def save_as_func(self):
+        options = QFileDialog.Options()
+        # options |= QFileDialog.DontUseNativeDialog
+        file_name, _ = QFileDialog.getSaveFileName(self, "另存为", "", "json Files (*.json)", options=options)
+        if file_name:
+            self.save_func(file_name)
