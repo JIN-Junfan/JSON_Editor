@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import QAction, QFileDialog, QMessageBox, QTreeWidgetItem, 
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtCore import Qt, QByteArray
 import json
+import os
 
 from exe_resource import Icon
 from json_editor_UI_ui import *
@@ -36,7 +37,10 @@ class Json_Edit(Ui_MainWindow):
         self.change_record = {}
         self.undo_record = {}
         self.save_data = None
-        self.unicode_flag = True
+        self.unicode_flag = False
+        self.format_flag = True
+        self.format_parameter = 4
+        self.json_name = None
     
     # 信号连接
     def connection_init(self):
@@ -75,9 +79,14 @@ class Json_Edit(Ui_MainWindow):
         self.edit_menu = self.menubar.addMenu('编辑')
         self.unicode_menubar_action = QAction('使用Unicode编码', self)
         self.unicode_menubar_action.setCheckable(True)
-        self.unicode_menubar_action.setChecked(True)
-        self.unicode_menubar_action.triggered.connect(self.Unicode_update)
+        self.unicode_menubar_action.setChecked(self.unicode_flag)
+        self.unicode_menubar_action.triggered.connect(self.unicode_update)
         self.edit_menu.addAction(self.unicode_menubar_action)
+        self.format_menubar_action = QAction('格式化输出json文件', self)
+        self.format_menubar_action.setCheckable(True)
+        self.format_menubar_action.setChecked(self.format_flag)
+        self.format_menubar_action.triggered.connect(self.format_update)
+        self.edit_menu.addAction(self.format_menubar_action)
         
         # 查找栏
         self.search_menu = self.menubar.addMenu('查看')
@@ -118,9 +127,14 @@ class Json_Edit(Ui_MainWindow):
         self.basic_toolbar.addAction(self.search_toolbar_action)
         self.unicode_toolbar_action = QAction(self.icon_setup(Icon.UNICODE), '使用Unicode编码',self)
         self.unicode_toolbar_action.setCheckable(True)
-        self.unicode_toolbar_action.setChecked(True)
-        self.unicode_toolbar_action.triggered.connect(self.Unicode_update)
+        self.unicode_toolbar_action.setChecked(self.unicode_flag)
+        self.unicode_toolbar_action.triggered.connect(self.unicode_update)
         self.basic_toolbar.addAction(self.unicode_toolbar_action)
+        self.format_toolbar_action = QAction(self.icon_setup(Icon.FORMAT), '格式化输出json文件',self)
+        self.format_toolbar_action.setCheckable(True)
+        self.format_toolbar_action.setChecked(self.format_flag)
+        self.format_toolbar_action.triggered.connect(self.format_update)
+        self.basic_toolbar.addAction(self.format_toolbar_action)
         self.undo_recover_update()
     
     # 撤销恢复更新
@@ -136,8 +150,6 @@ class Json_Edit(Ui_MainWindow):
     def context_menu_init(self, pos):
         item = self.sender().itemAt(pos)
         index = self.Win.treeWidget.indexFromItem(item)
-        print(index)
-        print(item)
         if item:
             column = self.sender().currentColumn()
             if column == 0:
@@ -214,22 +226,34 @@ class Json_Edit(Ui_MainWindow):
                 value_menu.exec_(self.sender().mapToGlobal(pos))
     
     # 更新Unicode设置
-    def Unicode_update(self):
+    def unicode_update(self):
         self.unicode_flag = not self.unicode_flag
         self.unicode_menubar_action.setChecked(self.unicode_flag)
         self.unicode_toolbar_action.setChecked(self.unicode_flag)
+    
+    def format_update(self):
+        self.format_flag = not self.format_flag
+        self.format_menubar_action.setChecked(self.format_flag)
+        self.format_toolbar_action.setChecked(self.format_flag)
+        self.format_parameter = 4 if self.format_flag else None
 
-    # 打开文件
+    # 打开json文件
     def open_file_func(self):
         # 打开浏览文件的对话框
         options = QFileDialog.Options()
         self.current_file_path, _ = QFileDialog.getOpenFileName(self, '请选择Json文件', '', 'json 文件 (*.json)', options=options)
+        self.read_file_func(self.current_file_path)
+    
+    # 读取json文件
+    def read_file_func(self, json_file):
         # 如果已经选择了文件，排除未选择而关闭对话框的情况
-        if self.current_file_path:
+        if json_file:
+            self.json_name = os.path.basename(json_file)
             # 读取json文件
-            with open(self.current_file_path, 'r', encoding='utf-8') as file:
+            with open(json_file, 'r', encoding='utf-8') as file:
                 self.json_data = json.load(file)
             self.update_tree()
+            self.setWindowTitle('Json编辑器\t\t'+self.json_name)
     
     # 更新树显示
     def update_tree(self):
@@ -397,7 +421,7 @@ class Json_Edit(Ui_MainWindow):
             else:
                 parent[path_list[-1]] = self.convert_data_type(str(value[1]), value[2])
         with open(file_path, 'w', encoding='utf-8') as json_file:
-            json.dump(self.json_data, json_file, ensure_ascii=self.unicode_menubar_action.isChecked())
+            json.dump(self.json_data, json_file, ensure_ascii=self.unicode_menubar_action.isChecked(), indent=self.format_parameter)
         self.update_tree()
     
     def convert_data_type(self, data_type, data):
@@ -440,6 +464,7 @@ class Json_Edit(Ui_MainWindow):
     def save_as_func(self):
         options = QFileDialog.Options()
         # options |= QFileDialog.DontUseNativeDialog
-        file_name, _ = QFileDialog.getSaveFileName(self, "另存为", "", "json Files (*.json)", options=options)
-        if file_name:
-            self.save_func(file_name)
+        file_path, _ = QFileDialog.getSaveFileName(self, "另存为", "", "json Files (*.json)", options=options)
+        if file_path:
+            self.save_func(file_path)
+            self.read_file_func(file_path)

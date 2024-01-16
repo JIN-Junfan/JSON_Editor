@@ -7,6 +7,7 @@ class Main(QMainWindow, Json_Edit):
     def __init__(self):
         super().__init__()
         self.setWindowIcon(self.win_icon)
+        self.setWindowTitle('Json编辑器\t\t')
         
 
 
