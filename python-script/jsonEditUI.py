@@ -1,6 +1,6 @@
 from PyQt5.QtCore import Qt,QEvent 
 from json_editor_UI_ui import *
-from PyQt5.QtWidgets import QMainWindow, QApplication, QSplitter, QVBoxLayout, QWidget, QAction, QFileDialog, QMessageBox,QTreeWidgetItem, QLineEdit,QToolBar, QPlainTextEdit
+from PyQt5.QtWidgets import QMainWindow, QApplication, QSplitter, QVBoxLayout, QWidget, QAction, QFileDialog, QMessageBox,QTreeWidgetItem, QLineEdit,QToolBar, QPlainTextEdit, QMenu
 from PyQt5.QtGui import QIcon, QPixmap, QKeyEvent
 from PyQt5.QtCore import QByteArray
 
@@ -35,17 +35,34 @@ class Json_Edit(Ui_MainWindow):
         super().__init__()
         self.Win = Ui_MainWindow()
         self.Win.setupUi(self)
+        self.parameter_init()
         self.menubar_init()
         self.toolbar_init()
+        self.connection_init()
+        self.UI_retranslate()
+    
+    # UI界面设置
+    def UI_retranslate(self):
         self.Win.treeWidget.clear()
         self.Win.treeWidget.setHeaderLabels(['键名 Key','值 Value'])
         self.Win.treeWidget.setColumnWidth(0, 300)
-        self.Win.treeWidget.doubleClicked.connect(self.get_selected_content)
-        self.Win.treeWidget.itemDoubleClicked.connect(self.edit_item)
         self.win_icon = self.icon_setup(Icon.JSON)
-        # self.currentEditingItem = None
-        # self.currentEditingColumn = -1
+        self.Win.treeWidget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.Win.treeWidget.customContextMenuRequested.connect(self.context_menu_init)
     
+    # 参数初始化
+    def parameter_init(self):
+        self.save_change = {}
+        self.change_record = {}
+        self.undo_record = {}
+        self.save_data = None
+        
+    # 信号连接
+    def connection_init(self):
+        self.Win.treeWidget.clicked.connect(self.get_selected_content)
+        self.Win.treeWidget.itemDoubleClicked.connect(self.edit_item)
+    
+    # 工具条初始化
     def toolbar_init(self):
         self.basic_toolbar = QToolBar("Toolbar", self) 
         self.addToolBar(self.basic_toolbar)
@@ -55,19 +72,34 @@ class Json_Edit(Ui_MainWindow):
         self.open_toolbar_action.triggered.connect(self.open_file_func)
         self.basic_toolbar.addAction(self.open_toolbar_action)
         self.save_toolbar_action = QAction(self.icon_setup(Icon.SAVE), '保存',self)
+        self.save_toolbar_action.triggered.connect(self.save_func)
         self.basic_toolbar.addAction(self.save_toolbar_action)
         self.saveas_toolbar_action = QAction(self.icon_setup(Icon.SAVEAS), '另存为',self)
         self.basic_toolbar.addAction(self.saveas_toolbar_action)
-        self.saveas_toolbar_action = QAction(self.icon_setup(Icon.UNDO), '撤销',self)
-        self.basic_toolbar.addAction(self.saveas_toolbar_action)
-        self.saveas_toolbar_action = QAction(self.icon_setup(Icon.RECOVER), '恢复',self)
-        self.basic_toolbar.addAction(self.saveas_toolbar_action)
+        self.undo_toolbar_action = QAction(self.icon_setup(Icon.UNDO), '撤销',self)
+        self.basic_toolbar.addAction(self.undo_toolbar_action)
+        self.recover_toolbar_action = QAction(self.icon_setup(Icon.RECOVER), '恢复',self)
+        self.basic_toolbar.addAction(self.recover_toolbar_action)
+        self.search_toolbar_action = QAction(self.icon_setup(Icon.SEARCH), '查找',self)
+        self.basic_toolbar.addAction(self.search_toolbar_action)
+        self.undo_recover_update()
     
+    # 撤销恢复更新
+    def undo_recover_update(self):
+        if not self.change_record:
+            self.undo_toolbar_action.setEnabled(False)
+        else: self.undo_toolbar_action.setEnabled(True)
+        if not self.undo_record:
+            self.recover_toolbar_action.setEnabled(False)
+        else: self.recover_toolbar_action.setEnabled(True)
+    
+    # 设置图标
     def icon_setup(self, icon_code):
         pixmap = QPixmap()
         pixmap.loadFromData(QByteArray(icon_code.encode()))
         return QIcon(pixmap)
     
+    # 菜单栏初始化
     def menubar_init(self):
         self.menubar = self.menuBar()
         # 文件栏
@@ -86,10 +118,6 @@ class Json_Edit(Ui_MainWindow):
         self.exit_menubar_action = QAction('退出', self)
         self.file_menu.addAction(self.exit_menubar_action)
         self.exit_menubar_action.triggered.connect(self.close)
-        
-        
-        
-        
         
         # 编辑栏
         self.edit_menu = self.menubar.addMenu('编辑')
@@ -110,21 +138,100 @@ class Json_Edit(Ui_MainWindow):
         # 帮助栏
         self.help_menu = self.menubar.addMenu('帮助')
     
-    # 打开文件
+    # 右键菜单
+    def context_menu_init(self, pos):
+        item = self.sender().itemAt(pos)
+        if item:
+            column = self.sender().currentColumn()
+            if column == 0:
+                # 创建 Key 的右键菜单
+                key_menu = QMenu(self)
+                rename_action = QAction('重命名', self)
+                key_menu.addAction(rename_action)
+                plugin_action = QAction('插入(向前)', self)
+                key_menu.addAction(plugin_action)
+                new_item_action = QAction('新建(向后)', self)
+                key_menu.addAction(new_item_action)
+                delete_action = QAction('删除', self)
+                key_menu.addAction(delete_action)
+                cut_action = QAction('剪切', self)
+                key_menu.addAction(cut_action)
+                copy_action = QAction('复制', self)
+                key_menu.addAction(copy_action)
+                paste_action = QAction('粘贴', self)
+                key_menu.addAction(paste_action)
+                key_menu.exec_(self.sender().mapToGlobal(pos))
+            elif column == 1:
+                # 创建 Value 的右键菜单
+                value_menu = QMenu(self)
+                change_type_menu = QMenu('改变数据类型', value_menu)
+                value_menu.addMenu(change_type_menu)
+                
+                int_action = QAction('int整数型', self)
+                int_action.setEnabled(self.test_convert(int, item.text(1)))
+                int_action.triggered.connect(lambda: self.data_type_change(item, 1))
+                change_type_menu.addAction(int_action)
+                
+                float_action = QAction('float浮点型', self)
+                float_action.setEnabled(self.test_convert(float, item.text(1)))
+                float_action.triggered.connect(lambda: self.data_type_change(item, 0.1))
+                change_type_menu.addAction(float_action)
+                
+                bool_action = QAction('bool布尔值型', self)
+                bool_action.setEnabled(self.test_convert('bool', item.text(1)))
+                bool_action.triggered.connect(lambda: self.data_type_change(item, True))
+                change_type_menu.addAction(bool_action)
+                
+                str_action = QAction('str字符型', self)
+                str_action.setEnabled(self.test_convert(str, item.text(1)))
+                str_action.triggered.connect(lambda: self.data_type_change(item, 'str'))
+                change_type_menu.addAction(str_action)
+                
+                null_action = QAction('null空值', self)
+                null_action.setEnabled(self.test_convert('None', item.text(1)))
+                null_action.triggered.connect(lambda: self.data_type_change(item, None))
+                change_type_menu.addAction(null_action)
+                
+                value_menu.addAction('Value Action 1')
+                value_menu.addAction('Value Action 2')
+                value_menu.exec_(self.sender().mapToGlobal(pos))
+    
     def open_file_func(self):
         # 打开浏览文件的对话框
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getOpenFileName(self, '请选择Json文件', '', 'json 文件 (*.json)', options=options)
+        self.current_file_path, _ = QFileDialog.getOpenFileName(self, '请选择Json文件', '', 'json 文件 (*.json)', options=options)
         # 如果已经选择了文件，排除未选择而关闭对话框的情况
-        if file_path:
-            # 清空上一个文件的显示
-            self.Win.treeWidget.clear()
-            self.Win.le_Dir.clear()
+        if self.current_file_path:
             # 读取json文件
-            with open(file_path, 'r', encoding='utf-8') as file:
+            with open(self.current_file_path, 'r', encoding='utf-8') as file:
                 self.json_data = json.load(file)
-            # 建立json数据树
-            self.populate_tree(self.json_data, self.Win.treeWidget)
+            self.update_tree()
+    
+    # 更新树显示
+    def update_tree(self):
+        expanded_state = {}
+        self.record_expanded_state(self.Win.treeWidget.invisibleRootItem(),expanded_state)
+        # 清空上一个文件的显示
+        self.Win.treeWidget.clear()
+        self.Win.le_Dir.clear()
+        # 建立json数据树
+        self.populate_tree(self.json_data, self.Win.treeWidget)
+        self.apply_expanded_state(self.Win.treeWidget.invisibleRootItem(), expanded_state)
+    
+    def record_expanded_state(self, item, expanded_state):
+        # 递归记录项的展开状态
+        for i in range(item.childCount()):
+            child_item = item.child(i)
+            expanded_state[child_item.text(0)] = item.isExpanded()
+            self.record_expanded_state(child_item, expanded_state)
+    
+    def apply_expanded_state(self, item, expanded_state):
+        # 递归应用保存的展开状态
+        for i in range(item.childCount()):
+            child_item = item.child(i)
+            if child_item.text(0) in expanded_state:
+                item.setExpanded(expanded_state[child_item.text(0)])
+            self.apply_expanded_state(child_item, expanded_state)
     
     # 构建树结构
     # json支持的数据类型：对象/字典，数组/列表，字符串，数字，布尔值，空值Null
@@ -185,6 +292,7 @@ class Json_Edit(Ui_MainWindow):
         self.Win.le_Dir.setText(path)
         # 在lb_TreeDataType显示当前数据的类型
         self.Win.lb_TreeDataType.setText(self.get_select_type_func(parent_path))
+        return path
     
     def get_select_type_func(self, key_list):
         try:
@@ -238,3 +346,66 @@ class Json_Edit(Ui_MainWindow):
         self.Win.treeWidget.removeItemWidget(self.currentEditingItem, self.currentEditingColumn)
         # 将文本添加回原项中
         self.currentEditingItem.setText(self.currentEditingColumn, edited_text)
+        
+        data_path = self.Win.le_Dir.text()
+        data_type = self.Win.lb_TreeDataType.text()
+        if edited_text != self.original_text:
+            self.save_change[data_path] = [None, data_type, edited_text]
+    
+    def save_func(self):
+        for key, value in self.save_change.items():
+            path_list = key.split('/')
+            parent = self.json_data
+            for path_part in path_list[0:-1]:
+                if path_part.startswith('<list>'):
+                    path_part = int(path_part.split('>')[1])
+                parent = parent[path_part]
+            path_list[-1] = int(path_list[-1].split('>')[1]) if path_list[-1].startswith('<list>') else path_list[-1]
+            if str(value[1]).split("'")[1] == 'bool':
+                if value[2].lower() == 'false':
+                    parent[path_list[-1]] = False
+                elif value[2].lower() == 'true':
+                    parent[path_list[-1]] = True
+                else: parent[path_list[-1]] = str(value[2])
+            else:
+                parent[path_list[-1]] = self.convert_data_type(str(value[1]), value[2])
+        with open(self.current_file_path, 'w', encoding='utf-8') as json_file:
+            json.dump(self.json_data, json_file)
+        self.update_tree()
+    
+    def convert_data_type(self, data_type, data):
+        data_type = data_type.split("'")[1]
+        try:
+            if data_type == "int":
+                data = int(data)
+            elif data_type == "float":
+                data = float(data)
+            elif data_type == "str":
+                data = str(data)
+            else: data = None
+        except:
+                data = str(data)
+        return data
+    
+    def test_convert(self, data_type, data):
+        try:
+            if data_type == 'bool':
+                if data.lower() == "false" or data.lower() == "true":
+                    return True
+                else: return False
+            elif data_type == 'None':
+                if data.lower() == 'none' or data.lower() == 'null':
+                    return True
+                else: return False
+            else:
+                data_type(data)
+                return True
+        except:
+            return False
+    
+    def data_type_change(self, item, data_type):
+        path = self.get_select_dir_func(item)
+        if path in self.save_change:
+            self.save_change[path][1] = type(data_type)
+        else: 
+            self.save_change[path] = [path, type(data_type), item.text(1)]
