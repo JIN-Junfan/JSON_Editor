@@ -221,8 +221,7 @@ class Json_Edit(Ui_MainWindow):
                 null_action.triggered.connect(lambda: self.data_type_change(item, None))
                 change_type_menu.addAction(null_action)
                 
-                value_menu.addAction('Value Action 1')
-                value_menu.addAction('Value Action 2')
+                
                 value_menu.exec_(self.sender().mapToGlobal(pos))
     
     # 更新Unicode设置
